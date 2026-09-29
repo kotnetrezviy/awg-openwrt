@@ -38,7 +38,7 @@ env:
     block-mount kmod-fs-ext4 kmod-fs-exfat kmod-usb-storage kmod-usb-storage-uas tune2fs usbutils
     sing-box kmod-nft-tproxy kmod-tun jq curl bind-dig coreutils-base64 ip-tiny resolveip
     kmod-udptunnel4 kmod-udptunnel6 kmod-crypto-lib-chacha20poly1305 kmod-crypto-lib-curve25519
-    tcpdump ffprobe openssl-util
+    tcpdump ffprobe openssl-util coreutils-timeout
     kmod-amneziawg amneziawg-tools luci-proto-amneziawg luci-i18n-amneziawg-ru
     podkop luci-app-podkop luci-i18n-podkop-ru
 
@@ -118,14 +118,16 @@ jobs:
           mkdir -p files/etc/uci-defaults
           cat > files/etc/uci-defaults/99-custom << 'EOF'
           #!/bin/sh
-          # Автозапуск TorrServer: сам init-скрипт переносится через sysupgrade.conf,
+          # Автозапуск своих служб: init-скрипты переносятся через sysupgrade.conf,
           # а ссылки в /etc/rc.d/ создаются здесь.
-          if [ -x /etc/init.d/torrserver ]; then
-            /etc/init.d/torrserver enable
-            # В первую загрузку после обновления список служб уже составлен
-            # до этого скрипта, поэтому запускаем отдельно, с запасом по времени.
-            ( sleep 60; /etc/init.d/torrserver start ) >/dev/null 2>&1 &
-          fi
+          for s in torrserver tgbot; do
+            if [ -x /etc/init.d/$s ]; then
+              /etc/init.d/$s enable
+              # В первую загрузку после обновления список служб уже составлен
+              # до этого скрипта, поэтому запускаем отдельно, с запасом по времени.
+              ( sleep 60; /etc/init.d/$s start ) >/dev/null 2>&1 &
+            fi
+          done
           exit 0
           EOF
           cat files/etc/uci-defaults/99-custom
