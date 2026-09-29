@@ -38,7 +38,7 @@ env:
     block-mount kmod-fs-ext4 kmod-fs-exfat kmod-usb-storage kmod-usb-storage-uas tune2fs usbutils
     sing-box kmod-nft-tproxy kmod-tun jq curl bind-dig coreutils-base64 ip-tiny resolveip
     kmod-udptunnel4 kmod-udptunnel6 kmod-crypto-lib-chacha20poly1305 kmod-crypto-lib-curve25519
-    tcpdump ffprobe
+    tcpdump ffprobe openssl-util
     kmod-amneziawg amneziawg-tools luci-proto-amneziawg luci-i18n-amneziawg-ru
     podkop luci-app-podkop luci-i18n-podkop-ru
 
