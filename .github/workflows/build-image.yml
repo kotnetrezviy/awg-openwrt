@@ -1,0 +1,171 @@
+name: Build Router Image
+run-name: "GL-MT6000 :: OpenWrt ${{ inputs.openwrt_version }} + Podkop ${{ inputs.podkop_version }}"
+
+# Собирает полный образ для GL.iNet Flint 2 (GL-MT6000):
+# официальные пакеты + AWG из своего релиза v<версия> + Podkop из itdoginfo/podkop.
+# AWG НЕ пересобирается: берутся уже проверенные файлы из релиза.
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_version:
+        description: "Версия OpenWrt (в этом репозитории должен быть релиз v<версия> с пакетами AWG)"
+        required: true
+        default: "24.10.8"
+        type: string
+      podkop_version:
+        description: "Тег релиза itdoginfo/podkop (без буквы v)"
+        required: true
+        default: "0.7.22"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TARGET: mediatek
+  SUBTARGET: filogic
+  PKGARCH: aarch64_cortex-a53
+  PROFILE: glinet_gl-mt6000
+  # Список пакетов. Минус перед именем = удалить из стандартного набора.
+  IMAGE_PACKAGES: >-
+    luci
+    -dnsmasq dnsmasq-full
+    adblock-fast luci-app-adblock-fast gawk grep sed coreutils-sort
+    luci-app-nlbwmon luci-app-vnstat2 vnstati2
+    luci-app-samba4 shadow-useradd
+    luci-app-wol
+    block-mount kmod-fs-ext4 kmod-fs-exfat kmod-usb-storage kmod-usb-storage-uas tune2fs usbutils
+    sing-box kmod-nft-tproxy kmod-tun jq curl bind-dig coreutils-base64 ip-tiny resolveip
+    kmod-udptunnel4 kmod-udptunnel6 kmod-crypto-lib-chacha20poly1305 kmod-crypto-lib-curve25519
+    tcpdump ffprobe
+    kmod-amneziawg amneziawg-tools luci-proto-amneziawg luci-i18n-amneziawg-ru
+    podkop luci-app-podkop luci-i18n-podkop-ru
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Проверить версию
+        run: |
+          set -euo pipefail
+          V="${{ inputs.openwrt_version }}"
+          MAJOR="${V%%.*}"
+          if [ "$MAJOR" != "24" ]; then
+            echo "::error::Пока поддерживается только ветка 24.10 (ipk). Для 25.x нужна доработка под apk."
+            exit 1
+          fi
+
+      - name: Установить зависимости ImageBuilder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential file gawk gettext libncurses-dev \
+            python3 python3-setuptools rsync unzip wget xsltproc zlib1g-dev zstd
+
+      - name: Скачать и проверить ImageBuilder
+        run: |
+          set -euo pipefail
+          V="${{ inputs.openwrt_version }}"
+          BASE="https://downloads.openwrt.org/releases/$V/targets/$TARGET/$SUBTARGET/"
+          IB_FILE=$(curl -fsSL "$BASE" | \
+            grep -oE "openwrt-imagebuilder-$V-$TARGET-$SUBTARGET\.Linux-x86_64\.tar\.(zst|xz)" | head -n1)
+          if [ -z "$IB_FILE" ]; then
+            echo "::error::ImageBuilder не найден в $BASE"
+            exit 1
+          fi
+          curl -fL --retry 3 -o "$IB_FILE" "$BASE$IB_FILE"
+          curl -fsSL -o sha256sums "${BASE}sha256sums"
+          grep -F "$IB_FILE" sha256sums | sha256sum -c -
+          mkdir ib
+          case "$IB_FILE" in
+            *.tar.zst) tar --zstd -xf "$IB_FILE" -C ib --strip-components=1 ;;
+            *.tar.xz)  tar -xf "$IB_FILE" -C ib --strip-components=1 ;;
+          esac
+          rm "$IB_FILE"
+
+      - name: Скачать пакеты AWG из своего релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          V="${{ inputs.openwrt_version }}"
+          SUFFIX="v${V}_${PKGARCH}_${TARGET}_${SUBTARGET}.ipk"
+          mkdir -p ib/packages
+          for p in amneziawg-tools kmod-amneziawg luci-proto-amneziawg luci-i18n-amneziawg-ru; do
+            gh release download "v$V" -R "$GITHUB_REPOSITORY" -p "${p}_${SUFFIX}" -D ib/packages
+          done
+          ls -l ib/packages
+
+      - name: Скачать пакеты Podkop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir podkop-dl
+          gh release download "${{ inputs.podkop_version }}" -R itdoginfo/podkop -p '*.ipk' -D podkop-dl
+          ls -l podkop-dl
+          for p in podkop luci-app-podkop luci-i18n-podkop-ru; do
+            if ! ls podkop-dl/${p}[-_]*.ipk >/dev/null 2>&1; then
+              echo "::error::В релизе Podkop нет пакета $p"
+              exit 1
+            fi
+          done
+          cp podkop-dl/*.ipk ib/packages/
+
+      - name: Скрипт первого запуска
+        run: |
+          set -euo pipefail
+          mkdir -p files/etc/uci-defaults
+          cat > files/etc/uci-defaults/99-custom << 'EOF'
+          #!/bin/sh
+          # Автозапуск TorrServer: сам init-скрипт переносится через sysupgrade.conf,
+          # а ссылки в /etc/rc.d/ создаются здесь.
+          [ -x /etc/init.d/torrserver ] && /etc/init.d/torrserver enable
+          exit 0
+          EOF
+          cat files/etc/uci-defaults/99-custom
+
+      - name: Собрать образ
+        run: |
+          set -euo pipefail
+          cd ib
+          make image \
+            PROFILE="$PROFILE" \
+            PACKAGES="$(echo $IMAGE_PACKAGES)" \
+            FILES="$GITHUB_WORKSPACE/files" \
+            EXTRA_IMAGE_NAME=custom
+
+      - name: Самопроверка образа
+        run: |
+          set -euo pipefail
+          OUT="ib/bin/targets/$TARGET/$SUBTARGET"
+          ls -l "$OUT"
+          M=$(ls "$OUT"/*.manifest | head -n1)
+          echo "Манифест: $M"
+          grep '^kernel - ' "$M"
+          for p in kmod-amneziawg amneziawg-tools luci-proto-amneziawg \
+                   podkop luci-app-podkop sing-box dnsmasq-full luci; do
+            if ! grep -q "^$p - " "$M"; then
+              echo "::error::В образе нет пакета $p"
+              exit 1
+            fi
+            grep "^$p - " "$M"
+          done
+          if grep -q '^dnsmasq - ' "$M"; then
+            echo "::error::В образе остался обычный dnsmasq"
+            exit 1
+          fi
+          ls "$OUT"/*sysupgrade*.bin >/dev/null
+          (cd "$OUT" && sha256sum *sysupgrade*.bin *.manifest > image-sha256sums.txt)
+          echo "Проверка пройдена."
+
+      - name: Выложить образ
+        uses: actions/upload-artifact@v4
+        with:
+          name: gl-mt6000-${{ inputs.openwrt_version }}-podkop-${{ inputs.podkop_version }}
+          path: |
+            ib/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*sysupgrade*.bin
+            ib/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*.manifest
+            ib/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/image-sha256sums.txt
+          if-no-files-found: error
+          retention-days: 30
