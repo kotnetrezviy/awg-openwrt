@@ -120,7 +120,12 @@ jobs:
           #!/bin/sh
           # Автозапуск TorrServer: сам init-скрипт переносится через sysupgrade.conf,
           # а ссылки в /etc/rc.d/ создаются здесь.
-          [ -x /etc/init.d/torrserver ] && /etc/init.d/torrserver enable
+          if [ -x /etc/init.d/torrserver ]; then
+            /etc/init.d/torrserver enable
+            # В первую загрузку после обновления список служб уже составлен
+            # до этого скрипта, поэтому запускаем отдельно, с запасом по времени.
+            ( sleep 60; /etc/init.d/torrserver start ) >/dev/null 2>&1 &
+          fi
           exit 0
           EOF
           cat files/etc/uci-defaults/99-custom
