@@ -29,7 +29,7 @@ env:
   PROFILE: glinet_gl-mt6000
   # Список пакетов. Минус перед именем = удалить из стандартного набора.
   IMAGE_PACKAGES: >-
-    luci
+    luci luci-ssl px5g-mbedtls kmod-lib-lzo kmod-crypto-acompress
     -dnsmasq dnsmasq-full
     adblock-fast luci-app-adblock-fast gawk grep sed coreutils-sort
     luci-app-nlbwmon luci-app-vnstat2 vnstati2
