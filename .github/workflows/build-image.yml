@@ -31,7 +31,7 @@ env:
   IMAGE_PACKAGES: >-
     luci luci-ssl px5g-mbedtls kmod-lib-lzo kmod-crypto-acompress
     -dnsmasq dnsmasq-full
-    adblock-fast luci-app-adblock-fast gawk grep sed coreutils-sort
+    gawk grep sed coreutils-sort
     luci-app-nlbwmon luci-app-vnstat2 vnstati2
     luci-app-samba4 shadow-useradd
     luci-app-wol
@@ -42,6 +42,7 @@ env:
     -wpad-basic-mbedtls wpad-mbedtls
     kmod-amneziawg amneziawg-tools luci-proto-amneziawg luci-i18n-amneziawg-ru
     podkop luci-app-podkop luci-i18n-podkop-ru
+    python3-light python3-codecs python3-openssl python3-urllib git wget-ssl
 
 jobs:
   build-image:
@@ -121,7 +122,7 @@ jobs:
           #!/bin/sh
           # Автозапуск своих служб: init-скрипты переносятся через sysupgrade.conf,
           # а ссылки в /etc/rc.d/ создаются здесь.
-          for s in torrserver tgbot; do
+          for s in torrserver tgbot pcmon botrun marketrec; do
             if [ -x /etc/init.d/$s ]; then
               /etc/init.d/$s enable
               # В первую загрузку после обновления список служб уже составлен
